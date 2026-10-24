@@ -78,6 +78,60 @@
       authMessage(message, "error");
     } finally { btn.disabled = false; btn.textContent = authMode === "signup" ? "Create account" : "Log in"; }
   }
+  async function onSession(session) {
+    // Called after login, signup, email confirmation, and Supabase auth-state changes.
+    clearRealtime();
+    if (!session?.user) {
+      state.user = null;
+      state.profile = null;
+      $("nav-login").classList.remove("hidden");
+      $("nav-logout").classList.add("hidden");
+      showView("landing-view");
+      return;
+    }
+
+    state.user = session.user;
+    $("nav-login").classList.add("hidden");
+    $("nav-logout").classList.remove("hidden");
+
+    try {
+      const { data, error } = await state.client
+        .from("profiles")
+        .select("id,full_name,email,phone,role,is_suspended")
+        .eq("id", session.user.id)
+        .maybeSingle();
+      if (error) throw error;
+
+      if (!data) {
+        // The profile trigger may not have run (or the email was confirmed after a schema
+        // change). Do not silently assign admin privileges; ask the user to complete profile.
+        state.profile = null;
+        $("profile-name").value = session.user.user_metadata?.full_name || "";
+        const requestedRole = session.user.user_metadata?.requested_role;
+        $("profile-role").value = requestedRole === "driver" ? "driver" : "passenger";
+        showView("profile-view");
+        return;
+      }
+
+      if (data.is_suspended) {
+        await state.client.auth.signOut();
+        state.user = null;
+        state.profile = null;
+        toast("This account is suspended. Please contact AutoSetu support.", "error");
+        showView("landing-view");
+        return;
+      }
+
+      state.profile = data;
+      await renderDashboard();
+    } catch (error) {
+      console.error("[AutoSetu] Session/profile load failed:", error);
+      state.profile = null;
+      showView("profile-view");
+      toast(friendlyError(error), "error");
+    }
+  }
+
   function clearRealtime() { state.realtime.forEach(ch => state.client?.removeChannel(ch)); state.realtime=[]; }
   async function saveProfile(e) {
     e.preventDefault(); if(!state.user)return;
