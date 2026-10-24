@@ -78,8 +78,11 @@
       authMessage(message, "error");
     } finally { btn.disabled = false; btn.textContent = authMode === "signup" ? "Create account" : "Log in"; }
   }
+  let sessionRun = 0;
   async function onSession(session) {
     // Called after login, signup, email confirmation, and Supabase auth-state changes.
+    // Ignore stale async profile loads when newer auth events arrive.
+    const runId = ++sessionRun;
     clearRealtime();
     if (!session?.user) {
       state.user = null;
@@ -100,6 +103,7 @@
         .select("id,full_name,email,phone,role,is_suspended")
         .eq("id", session.user.id)
         .maybeSingle();
+      if (runId !== sessionRun) return;
       if (error) throw error;
 
       if (!data) {
@@ -123,8 +127,10 @@
       }
 
       state.profile = data;
+      if (runId !== sessionRun) return;
       await renderDashboard();
     } catch (error) {
+      if (runId !== sessionRun) return;
       console.error("[AutoSetu] Session/profile load failed:", error);
       state.profile = null;
       showView("profile-view");
@@ -309,8 +315,9 @@
     $("profile-form").addEventListener("submit",saveProfile);
     if("serviceWorker" in navigator && location.protocol.startsWith("https")) navigator.serviceWorker.register("./sw.js").catch(()=>{});
     if(!requireClient())return;
-    const {data:{session}}=await state.client.auth.getSession();await onSession(session);
-    state.client.auth.onAuthStateChange((_event,session)=>{setTimeout(()=>onSession(session),0);});
+    state.client.auth.onAuthStateChange((_event, session)=>{setTimeout(()=>onSession(session),0);});
+    const {data:{session}}=await state.client.auth.getSession();
+    await onSession(session);
   }
   document.addEventListener("DOMContentLoaded",init);
 })();
